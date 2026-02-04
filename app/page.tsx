@@ -1,19 +1,19 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import * as tf from '@tensorflow/tfjs';
 import styles from './page.module.css';
 
 export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [model, setModel] = useState<any>(null);
   const [classNames, setClassNames] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [predictions, setPredictions] = useState<Array<{class: string, probability: number}>>([]);
   const [isDetecting, setIsDetecting] = useState(false);
   const animationFrameRef = useRef<number | null>(null);
+  const tfRef = useRef<any>(null);
 
   // URL del modelo de Teachable Machine
   const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/1w1r1kMHI/model.json';
@@ -36,6 +36,12 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
+      
+      // Cargar TensorFlow.js dinámicamente solo en el cliente
+      if (!tfRef.current) {
+        tfRef.current = await import('@tensorflow/tfjs');
+      }
+      const tf = tfRef.current;
       
       let loadedClassNames: string[] = [];
       
@@ -131,6 +137,12 @@ export default function Home() {
       // Dibujar el frame actual del video en el canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+      // Usar TensorFlow.js ya cargado
+      if (!tfRef.current) {
+        tfRef.current = await import('@tensorflow/tfjs');
+      }
+      const tf = tfRef.current;
+
       // Preprocesar la imagen para el modelo
       const image = tf.browser.fromPixels(canvas);
       const resized = tf.image.resizeBilinear(image, [224, 224]);
@@ -138,7 +150,7 @@ export default function Home() {
       const batched = normalized.expandDims(0);
 
       // Realizar la predicción
-      const prediction = model.predict(batched) as tf.Tensor;
+      const prediction = model.predict(batched) as any;
       const probabilities = await prediction.data();
 
       // Obtener las clases del modelo
