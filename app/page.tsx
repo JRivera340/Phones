@@ -32,6 +32,14 @@ export default function Home() {
     };
   }, []);
 
+  // Asegurar que el loop se detenga cuando isDetecting cambie a false
+  useEffect(() => {
+    if (!isDetecting && animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+  }, [isDetecting]);
+
   const loadModel = async () => {
     try {
       setLoading(true);
@@ -74,7 +82,11 @@ export default function Home() {
       setClassNames(loadedClassNames);
       setModel(loadedModel);
       setLoading(false);
-      console.log('Modelo cargado exitosamente', { classNames: loadedClassNames });
+      console.log('Modelo cargado exitosamente', { 
+        classNames: loadedClassNames,
+        numClasses: loadedClassNames.length,
+        modelOutputShape: loadedModel.outputs[0].shape
+      });
     } catch (err) {
       console.error('Error al cargar el modelo:', err);
       setError('Error al cargar el modelo. Por favor, verifica la URL del modelo.');
@@ -94,13 +106,24 @@ export default function Home() {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
         
         // Esperar a que el video esté listo antes de iniciar la detección
-        videoRef.current.onloadedmetadata = () => {
+        const handleLoadedMetadata = () => {
           setIsDetecting(true);
-          detectLoop();
+          // Iniciar el loop de detección después de un pequeño delay
+          setTimeout(() => {
+            detectLoop();
+          }, 100);
         };
+        
+        if (videoRef.current.readyState >= 2) {
+          // El video ya está listo
+          handleLoadedMetadata();
+        } else {
+          videoRef.current.onloadedmetadata = handleLoadedMetadata;
+        }
+        
+        await videoRef.current.play();
       }
     } catch (err) {
       console.error('Error al acceder a la cámara:', err);
@@ -121,7 +144,9 @@ export default function Home() {
   };
 
   const detectLoop = async () => {
-    if (!model || !videoRef.current || !canvasRef.current || !isDetecting) {
+    // Verificar condiciones antes de continuar
+    if (!model || !videoRef.current || !canvasRef.current) {
+      console.log('Condiciones no cumplidas:', { model: !!model, video: !!videoRef.current, canvas: !!canvasRef.current });
       return;
     }
 
@@ -129,10 +154,21 @@ export default function Home() {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
+    // Verificar que el video tenga datos suficientes
+    if (video.readyState < video.HAVE_CURRENT_DATA || !ctx) {
+      // Si no hay datos aún, intentar de nuevo en el siguiente frame
+      if (isDetecting) {
+        animationFrameRef.current = requestAnimationFrame(detectLoop);
+      }
+      return;
+    }
+
+    try {
       // Configurar canvas con las dimensiones del video
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
 
       // Dibujar el frame actual del video en el canvas
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -163,6 +199,7 @@ export default function Home() {
         .sort((a: PredictionResult, b: PredictionResult) => b.probability - a.probability);
 
       setPredictions(results);
+      console.log('Predicciones:', results);
 
       // Limpiar tensores
       image.dispose();
@@ -170,8 +207,11 @@ export default function Home() {
       normalized.dispose();
       batched.dispose();
       prediction.dispose();
+    } catch (err) {
+      console.error('Error en detectLoop:', err);
     }
 
+    // Continuar el loop si aún está detectando
     if (isDetecting) {
       animationFrameRef.current = requestAnimationFrame(detectLoop);
     }
@@ -214,27 +254,35 @@ export default function Home() {
               />
               <canvas ref={canvasRef} className={styles.canvas} />
               
-              {topPrediction && (
+              {isDetecting && (
                 <div className={styles.overlay}>
-                  <div className={styles.predictionBox}>
-                    <div className={styles.predictionLabel}>
-                      {topPrediction.class}
+                  {topPrediction ? (
+                    <div className={styles.predictionBox}>
+                      <div className={styles.predictionLabel}>
+                        {topPrediction.class}
+                      </div>
+                      <div className={styles.predictionBar}>
+                        <div
+                          className={styles.predictionFill}
+                          style={{
+                            width: `${topPrediction.probability * 100}%`,
+                            backgroundColor: topPrediction.probability > 0.5 
+                              ? '#4ade80' 
+                              : '#fbbf24'
+                          }}
+                        />
+                      </div>
+                      <div className={styles.predictionPercent}>
+                        {(topPrediction.probability * 100).toFixed(1)}%
+                      </div>
                     </div>
-                    <div className={styles.predictionBar}>
-                      <div
-                        className={styles.predictionFill}
-                        style={{
-                          width: `${topPrediction.probability * 100}%`,
-                          backgroundColor: topPrediction.probability > 0.5 
-                            ? '#4ade80' 
-                            : '#fbbf24'
-                        }}
-                      />
+                  ) : (
+                    <div className={styles.predictionBox}>
+                      <div className={styles.predictionLabel}>
+                        Analizando...
+                      </div>
                     </div>
-                    <div className={styles.predictionPercent}>
-                      {(topPrediction.probability * 100).toFixed(1)}%
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
