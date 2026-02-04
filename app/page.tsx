@@ -1,0 +1,265 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import * as tf from '@tensorflow/tfjs';
+import styles from './page.module.css';
+
+export default function Home() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [model, setModel] = useState<tf.LayersModel | null>(null);
+  const [classNames, setClassNames] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [predictions, setPredictions] = useState<Array<{class: string, probability: number}>>([]);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const animationFrameRef = useRef<number | null>(null);
+
+  // URL del modelo de Teachable Machine
+  const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/1w1r1kMHI/model.json';
+  const METADATA_URL = 'https://teachablemachine.withgoogle.com/models/1w1r1kMHI/metadata.json';
+
+  useEffect(() => {
+    loadModel();
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (videoRef.current?.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const loadModel = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      let loadedClassNames: string[] = [];
+      
+      // Intentar cargar los metadatos para obtener los nombres de las clases
+      try {
+        const metadataResponse = await fetch(METADATA_URL);
+        if (metadataResponse.ok) {
+          const metadata = await metadataResponse.json();
+          if (metadata.labels && Array.isArray(metadata.labels)) {
+            loadedClassNames = metadata.labels;
+          }
+        }
+      } catch (metadataErr) {
+        console.warn('No se pudieron cargar los metadatos, usando nombres por defecto');
+      }
+      
+      // Cargar el modelo de Teachable Machine
+      const loadedModel = await tf.loadLayersModel(MODEL_URL);
+      
+      // Si no se cargaron los nombres de las clases, usar nombres por defecto
+      if (loadedClassNames.length === 0) {
+        // Intentar obtener el número de clases del modelo
+        const outputShape = loadedModel.outputs[0].shape;
+        const numClasses = outputShape ? outputShape[outputShape.length - 1] : 2;
+        loadedClassNames = Array.from({ length: numClasses }, (_, i) => 
+          i === 0 ? 'Celular' : `Clase ${i}`
+        );
+      }
+      
+      setClassNames(loadedClassNames);
+      setModel(loadedModel);
+      setLoading(false);
+      console.log('Modelo cargado exitosamente', { classNames: loadedClassNames });
+    } catch (err) {
+      console.error('Error al cargar el modelo:', err);
+      setError('Error al cargar el modelo. Por favor, verifica la URL del modelo.');
+      setLoading(false);
+    }
+  };
+
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { 
+          width: 640, 
+          height: 480,
+          facingMode: 'environment' // Para usar la cámara trasera en móviles
+        }
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        
+        // Esperar a que el video esté listo antes de iniciar la detección
+        videoRef.current.onloadedmetadata = () => {
+          setIsDetecting(true);
+          detectLoop();
+        };
+      }
+    } catch (err) {
+      console.error('Error al acceder a la cámara:', err);
+      setError('No se pudo acceder a la cámara. Por favor, permite el acceso a la cámara.');
+    }
+  };
+
+  const stopCamera = () => {
+    if (videoRef.current?.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsDetecting(false);
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+  };
+
+  const detectLoop = async () => {
+    if (!model || !videoRef.current || !canvasRef.current || !isDetecting) {
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    if (video.readyState === video.HAVE_ENOUGH_DATA && ctx) {
+      // Configurar canvas con las dimensiones del video
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      // Dibujar el frame actual del video en el canvas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      // Preprocesar la imagen para el modelo
+      const image = tf.browser.fromPixels(canvas);
+      const resized = tf.image.resizeBilinear(image, [224, 224]);
+      const normalized = resized.div(255.0);
+      const batched = normalized.expandDims(0);
+
+      // Realizar la predicción
+      const prediction = model.predict(batched) as tf.Tensor;
+      const probabilities = await prediction.data();
+
+      // Obtener las clases del modelo
+      const results = Array.from(probabilities)
+        .map((prob, index) => ({
+          class: classNames[index] || `Clase ${index}`,
+          probability: prob
+        }))
+        .sort((a, b) => b.probability - a.probability);
+
+      setPredictions(results);
+
+      // Limpiar tensores
+      image.dispose();
+      resized.dispose();
+      normalized.dispose();
+      batched.dispose();
+      prediction.dispose();
+    }
+
+    if (isDetecting) {
+      animationFrameRef.current = requestAnimationFrame(detectLoop);
+    }
+  };
+
+  const topPrediction = predictions[0];
+
+  return (
+    <main className={styles.main}>
+      <div className={styles.container}>
+        <h1 className={styles.title}>Detector de Celulares</h1>
+        <p className={styles.subtitle}>
+          Usando modelo de Teachable Machine
+        </p>
+
+        {loading && (
+          <div className={styles.loading}>
+            <div className={styles.spinner}></div>
+            <p>Cargando modelo...</p>
+          </div>
+        )}
+
+        {error && (
+          <div className={styles.error}>
+            <p>{error}</p>
+            <button onClick={loadModel} className={styles.button}>
+              Reintentar
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && (
+          <>
+            <div className={styles.videoContainer}>
+              <video
+                ref={videoRef}
+                className={styles.video}
+                playsInline
+                muted
+              />
+              <canvas ref={canvasRef} className={styles.canvas} />
+              
+              {topPrediction && (
+                <div className={styles.overlay}>
+                  <div className={styles.predictionBox}>
+                    <div className={styles.predictionLabel}>
+                      {topPrediction.class}
+                    </div>
+                    <div className={styles.predictionBar}>
+                      <div
+                        className={styles.predictionFill}
+                        style={{
+                          width: `${topPrediction.probability * 100}%`,
+                          backgroundColor: topPrediction.probability > 0.5 
+                            ? '#4ade80' 
+                            : '#fbbf24'
+                        }}
+                      />
+                    </div>
+                    <div className={styles.predictionPercent}>
+                      {(topPrediction.probability * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className={styles.controls}>
+              {!isDetecting ? (
+                <button onClick={startCamera} className={styles.button}>
+                  Iniciar Detección
+                </button>
+              ) : (
+                <button onClick={stopCamera} className={styles.buttonDanger}>
+                  Detener Detección
+                </button>
+              )}
+            </div>
+
+            {predictions.length > 0 && (
+              <div className={styles.predictions}>
+                <h3>Resultados:</h3>
+                {predictions.map((pred, index) => (
+                  <div key={index} className={styles.predictionItem}>
+                    <span className={styles.predictionClass}>{pred.class}</span>
+                    <div className={styles.probabilityBar}>
+                      <div
+                        className={styles.probabilityFill}
+                        style={{ width: `${pred.probability * 100}%` }}
+                      />
+                    </div>
+                    <span className={styles.probabilityText}>
+                      {(pred.probability * 100).toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </main>
+  );
+}
