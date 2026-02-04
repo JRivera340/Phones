@@ -190,8 +190,15 @@
 .predictions h3 {
   font-size: 1.3rem;
   color: #1f2937;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
   text-align: center;
+}
+
+.predictionsSubtitle {
+  font-size: 0.9rem;
+  color: #6b7280;
+  text-align: center;
+  margin-bottom: 15px;
 }
 
 .predictionItem {

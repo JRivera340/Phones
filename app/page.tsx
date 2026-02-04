@@ -55,40 +55,57 @@ export default function Home() {
       
       // Intentar cargar los metadatos para obtener los nombres de las clases
       try {
+        console.log('Cargando metadatos desde:', METADATA_URL);
         const metadataResponse = await fetch(METADATA_URL);
         if (metadataResponse.ok) {
           const metadata = await metadataResponse.json();
+          console.log('Metadatos cargados:', metadata);
+          
+          // Intentar diferentes formatos de metadatos de Teachable Machine
           if (metadata.labels && Array.isArray(metadata.labels)) {
             loadedClassNames = metadata.labels;
+          } else if (metadata.classNames && Array.isArray(metadata.classNames)) {
+            loadedClassNames = metadata.classNames;
+          } else if (metadata.classes && Array.isArray(metadata.classes)) {
+            loadedClassNames = metadata.classes;
           }
+          
+          console.log('Nombres de clases encontrados:', loadedClassNames);
+        } else {
+          console.warn('No se pudo cargar metadatos, status:', metadataResponse.status);
         }
       } catch (metadataErr) {
-        console.warn('No se pudieron cargar los metadatos, usando nombres por defecto');
+        console.warn('Error al cargar los metadatos:', metadataErr);
       }
       
       // Cargar el modelo de Teachable Machine
+      console.log('Cargando modelo desde:', MODEL_URL);
       const loadedModel = await tf.loadLayersModel(MODEL_URL);
+      console.log('Modelo cargado, forma de salida:', loadedModel.outputs[0].shape);
       
-      // Si no se cargaron los nombres de las clases, usar nombres por defecto
+      // Si no se cargaron los nombres de las clases, obtenerlos del modelo
       if (loadedClassNames.length === 0) {
         // Intentar obtener el número de clases del modelo
         const outputShape = loadedModel.outputs[0].shape;
         const numClasses = outputShape ? outputShape[outputShape.length - 1] : 2;
+        console.log('Número de clases detectado del modelo:', numClasses);
+        
+        // Crear nombres genéricos basados en el número de clases
         loadedClassNames = Array.from({ length: numClasses }, (_, i) => 
-          i === 0 ? 'Celular' : `Clase ${i}`
+          `Clase ${i + 1}`
         );
       }
       
       setClassNames(loadedClassNames);
       setModel(loadedModel);
       setLoading(false);
-      console.log('Modelo cargado exitosamente', { 
+      console.log('✅ Modelo cargado exitosamente', { 
         classNames: loadedClassNames,
         numClasses: loadedClassNames.length,
         modelOutputShape: loadedModel.outputs[0].shape
       });
     } catch (err) {
-      console.error('Error al cargar el modelo:', err);
+      console.error('❌ Error al cargar el modelo:', err);
       setError('Error al cargar el modelo. Por favor, verifica la URL del modelo.');
       setLoading(false);
     }
@@ -301,14 +318,24 @@ export default function Home() {
 
             {predictions.length > 0 && (
               <div className={styles.predictions}>
-                <h3>Resultados:</h3>
+                <h3>Resultados de Detección:</h3>
+                <p className={styles.predictionsSubtitle}>
+                  {classNames.length} {classNames.length === 1 ? 'clase' : 'clases'} detectadas
+                </p>
                 {predictions.map((pred, index) => (
                   <div key={index} className={styles.predictionItem}>
                     <span className={styles.predictionClass}>{pred.class}</span>
                     <div className={styles.probabilityBar}>
                       <div
                         className={styles.probabilityFill}
-                        style={{ width: `${pred.probability * 100}%` }}
+                        style={{ 
+                          width: `${pred.probability * 100}%`,
+                          backgroundColor: pred.probability > 0.7 
+                            ? '#4ade80' 
+                            : pred.probability > 0.4 
+                            ? '#fbbf24' 
+                            : '#f87171'
+                        }}
                       />
                     </div>
                     <span className={styles.probabilityText}>
