@@ -154,12 +154,13 @@ export default function Home() {
       const probabilities = await prediction.data();
 
       // Obtener las clases del modelo
-      const results = Array.from(probabilities)
-        .map((prob, index) => ({
+      type PredictionResult = { class: string; probability: number };
+      const results: PredictionResult[] = Array.from(probabilities as number[])
+        .map((prob: number, index: number) => ({
           class: classNames[index] || `Clase ${index}`,
           probability: prob
         }))
-        .sort((a, b) => b.probability - a.probability);
+        .sort((a: PredictionResult, b: PredictionResult) => b.probability - a.probability);
 
       setPredictions(results);
 
