@@ -32,6 +32,14 @@ export default function Home() {
     };
   }, []);
 
+  // Iniciar la cámara automáticamente cuando el modelo esté cargado
+  useEffect(() => {
+    if (!loading && !error && model && !isDetecting) {
+      startCamera();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, error, model]);
+
   // Asegurar que el loop se detenga cuando isDetecting cambie a false
   useEffect(() => {
     if (!isDetecting && animationFrameRef.current) {
@@ -148,17 +156,6 @@ export default function Home() {
     }
   };
 
-  const stopCamera = () => {
-    if (videoRef.current?.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach(track => track.stop());
-      videoRef.current.srcObject = null;
-    }
-    setIsDetecting(false);
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
-  };
 
   const detectLoop = async () => {
     // Verificar condiciones antes de continuar
@@ -271,7 +268,7 @@ export default function Home() {
               />
               <canvas ref={canvasRef} className={styles.canvas} />
               
-              {isDetecting && (
+              {(isDetecting || topPrediction) && (
                 <div className={styles.overlay}>
                   {topPrediction ? (
                     <div className={styles.predictionBox}>
@@ -283,9 +280,11 @@ export default function Home() {
                           className={styles.predictionFill}
                           style={{
                             width: `${topPrediction.probability * 100}%`,
-                            backgroundColor: topPrediction.probability > 0.5 
+                            backgroundColor: topPrediction.probability > 0.7 
                               ? '#4ade80' 
-                              : '#fbbf24'
+                              : topPrediction.probability > 0.4
+                              ? '#fbbf24'
+                              : '#f87171'
                           }}
                         />
                       </div>
@@ -301,18 +300,6 @@ export default function Home() {
                     </div>
                   )}
                 </div>
-              )}
-            </div>
-
-            <div className={styles.controls}>
-              {!isDetecting ? (
-                <button onClick={startCamera} className={styles.button}>
-                  Iniciar Detección
-                </button>
-              ) : (
-                <button onClick={stopCamera} className={styles.buttonDanger}>
-                  Detener Detección
-                </button>
               )}
             </div>
 
